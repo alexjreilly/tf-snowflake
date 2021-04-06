@@ -9,12 +9,12 @@ terraform {
 
 provider "snowflake" {
   role     = "SYSADMIN"
-  username = var.SNOWFLAKE_USER
+  username = "tf-snow"
   account  = "NB57995"
   region   = "EUROPE-WEST2.GCP"
 
   // optional, at exactly one must be set
-  private_key_path = var.SNOWFLAKE_PRIVATE_KEY_PATH
+  private_key_path = "./tf-snow_private_key"
 }
 
 resource "snowflake_database" "my_db" {
