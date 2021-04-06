@@ -1,1 +1,1 @@
-prefix         = "staging"
+prefix = "staging"
