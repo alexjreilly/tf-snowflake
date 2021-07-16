@@ -13,7 +13,7 @@ provider "snowflake" {
   account = var.SNOWFLAKE_provider_account
   region = var.SNOWFLAKE_provider_region
   username = var.SNOWFLAKE_provider_username
-  password = var.SNOWFLAKE_provider_password
+  private_key_path = "./tf-snow_private_key"
   role = "ACCOUNTADMIN"
 }
 
