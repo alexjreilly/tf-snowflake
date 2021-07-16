@@ -1,36 +1,53 @@
 terraform {
+  required_version = ">=1.0.0"
+
   required_providers {
     snowflake = {
       source  = "chanzuckerberg/snowflake"
-      version = "0.22.0"
+      version = "~> 0.24.0"
     }
   }
 }
 
 provider "snowflake" {
-  role     = "SYSADMIN"
-  username = "tf-snow"
-  account  = "NB57995"
-  region   = "EUROPE-WEST2.GCP"
-
-  // optional, at exactly one must be set
-  private_key_path = "./tf-snow_private_key"
+  account = var.SNOWFLAKE_provider_account
+  region = var.SNOWFLAKE_provider_region
+  username = var.SNOWFLAKE_provider_username
+  password = var.SNOWFLAKE_provider_password
+  role = "ACCOUNTADMIN"
 }
 
-resource "snowflake_database" "my_db" {
-  name = "${var.resource_prefix}_my_db"
+resource "snowflake_database" "landing_db" {
+  name    = "RAW"
+  comment = "Some comment"
 }
 
-resource "snowflake_warehouse" "my_warehouse1" {
-  name           = "${var.resource_prefix}_my_wwarehouse1"
-  warehouse_size = "xsmall"
-
-  auto_suspend = 60
+module "landing_schema1" {
+  source = "./modules/landing_schema/"
+  landing_db_name = snowflake_database.landing_db.name
+  landing_schema = "SCHEMA_1"
+  landing_tables = {
+    "TABLE_1": {
+      "COL1": "VARCHAR(100)",
+      "COL2": "VARCHAR(100)"
+    }
+  }
 }
 
-resource "snowflake_warehouse" "my_warehouse2" {
-  name           = "${var.resource_prefix}_my_warehouse2"
-  warehouse_size = "xsmall"
-
-  auto_suspend = 60
+module "landing_schema2" {
+  source = "./modules/landing_schema/"
+  landing_db_name = snowflake_database.landing_db.name
+  landing_schema = "SCHEMA_2"
+  landing_tables = {
+    "CUSTOMER": {
+      "CUSTOMER_KEY": "NUMBER(38,0)",
+      "NAME": "VARCHAR(100)",
+      "DOB": "TIMESTAMP_NTZ(9)"
+    },
+    "TRANSACTION": {
+      "TRANSACTION_KEY": "NUMBER(38,0)",
+      "CUSTOMER_KEY": "NUMBER(38,0)",
+      "TRANSACTION_DATETIME": "TIMESTAMP_NTZ(9)"
+    }
+  }
 }
