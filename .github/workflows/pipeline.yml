@@ -20,11 +20,8 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-20.04
     outputs:
-      filter_orchestration: ${{ steps.filter.outputs.orchestration }}
-      filter_singer: ${{ steps.filter.outputs.singer }}
       filter_terraform: ${{ steps.filter.outputs.terraform }}
       branch: ${{ steps.output_branch_name.outputs.branch }}
-      gcp_project: ${{ steps.output_gcp_project.outputs.gcp_project }}
 
     steps:
 
