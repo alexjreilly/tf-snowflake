@@ -38,14 +38,6 @@ jobs:
 
       - uses: actions/checkout@v2
 
-      - name: Check for files change
-        uses: dorny/paths-filter@v2
-        id: filter
-        with:
-          token: ${{ github.token }}
-          filters: .github/file-filters.yml
-          working-directory: ${{ github.workspace }}
-
       # Extract branch name on push
       - name: Extract branch name
         if: github.event_name == 'push'
