@@ -1,56 +1,138 @@
-# This is a basic workflow to help you get started with Actions
+name: tf-snowflake
 
-name: CI
-
-# Controls when the action will run. 
 on:
   push:
     branches:
-      - staging
-      - master
+    - 'master'
+    - 'staging'
   pull_request:
     branches:
-      - staging
-      - master
+    - master
+    - staging
+    # Add ready_for_review so checks auto run when converted from draft PR.
+    types: [ready_for_review, opened, synchronize, reopened]
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+  setup:
+    name: Setup - cancel previous runs, run file filters, and extract branch name
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-20.04
+    outputs:
+      filter_orchestration: ${{ steps.filter.outputs.orchestration }}
+      filter_singer: ${{ steps.filter.outputs.singer }}
+      filter_terraform: ${{ steps.filter.outputs.terraform }}
+      branch: ${{ steps.output_branch_name.outputs.branch }}
+      gcp_project: ${{ steps.output_gcp_project.outputs.gcp_project }}
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+
+      # We are billed for actions runtime, and if a new commit is pushed we
+      # might as well cancel this current workflow as the another run will need
+      # to happen regardless.
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.8.0
+        with:
+          access_token: ${{ github.token }}
+
       - uses: actions/checkout@v2
-      - uses: hashicorp/setup-terraform@v1
 
-      - name: Initialise variables
-        run: ./snowflake.env
+      - name: Check for files change
+        uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          token: ${{ github.token }}
+          filters: .github/file-filters.yml
+          working-directory: ${{ github.workspace }}
 
-      - name: Terraform fmt
-        id: fmt
-        run: terraform fmt -check
-        continue-on-error: true
+      # Extract branch name on push
+      - name: Extract branch name
+        if: github.event_name == 'push'
+        run: echo "branch=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_ENV
 
-      - name: Terraform Init
-        id: init
+      # Extract branch name on pull request
+      - name: Extract branch name (PR)
+        if: github.event_name == 'pull_request'
+        run: echo "branch=$(echo ${GITHUB_BASE_REF#refs/heads/})" >> $GITHUB_ENV
+
+        # Output branch name so we can pass it to other jobs
+      - name: Output branch name
+        id: output_branch_name
+        run: echo "::set-output name=branch::${{ env.branch }}"
+
+
+  deploy:
+    runs-on: ubuntu-20.04
+    needs:
+      - setup
+    if: (github.event_name == 'push' || github.event.pull_request.draft == false)
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Set terraform version output
+        id: tf_version
+        run: echo "::set-output name=tf_version::$(tr -d '\n' < .terraform-version)"
+        working-directory: ${{ github.workspace }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: ${{ steps.tf_version.outputs.tf_version }}
+
+      # select tfstate bucket based on branch
+      - name: Terraform init
         run: terraform init
 
-      - name: Terraform Validate
-        id: validate
-        run: terraform validate -no-color
+      # Terraform plan
+      # get project_id from <branch>.tfvars file
+      - id: plan
+        run: |
+          terraform plan \
+            -no-color \
+            -input=false \
+            -var "SNOWFLAKE_provider_username=${{ secrets.TERRAFORM_SNOWFLAKE_USERNAME }}" \
+            -var "SNOWFLAKE_provider_password=${{ secrets.TERRAFORM_SNOWFLAKE_PASSWORD }}" \
+            -out tfplan
 
-      - name: Terraform Plan
-        id: plan
-        run: terraform plan -no-color
-        continue-on-error: true
+      - name: Output TF plan to PR comment
+        uses: actions/github-script@0.9.0
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+          PLAN_master_only: "terraform\n${{ steps.plan_master_only.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
 
-      - name: Terraform Apply
-        id: apply
-        run: terraform apply -auto-approve
-        continue-on-error: true
+            <details><summary>Show Plan</summary>
+
+            \`\`\`${process.env.PLAN}\`\`\`
+
+            </details>
+
+            <details><summary>Show Plan - Snowflake (master)</summary>
+
+            \`\`\`${process.env.PLAN_master_only}\`\`\`
+
+            </details>
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            github.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      # only apply on push to staging/master branch
+      - name: Terraform apply
+        run: terraform apply -input=false tfplan
+        if: github.event_name == 'push'
