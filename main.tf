@@ -18,7 +18,7 @@ provider "snowflake" {
 }
 
 resource "snowflake_database" "landing_db" {
-  name    = "RAW"
+  name    = terraform.workspace == "default" ? "RAW" : "RAW_${terraform.workspace}"
   comment = "Some comment"
 }
 
